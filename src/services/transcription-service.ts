@@ -9,7 +9,7 @@ export class TranscriptionService extends EventEmitter {
   private finalResult: string
   private speechFinal: boolean
 
-  constructor() {
+  constructor(language: string) {
     super()
     const deepgram = new Deepgram(process.env.DEEPGRAM_API_KEY!!)
     this.deepgramLive = deepgram.transcription.live({
@@ -20,12 +20,14 @@ export class TranscriptionService extends EventEmitter {
       interim_results: true,
       endpointing: 200,
       utterance_end_ms: 1000,
+      language: language
     })
 
     this.finalResult = ''
     this.speechFinal = false // used to determine if we have seen speech_final=true indicating that deepgram detected a natural pause in the speakers speech. 
 
     this.deepgramLive.addListener('transcriptReceived', (transcriptionMessage) => {
+      // console.log('>>>', transcriptionMessage)
       const transcription = JSON.parse(transcriptionMessage)
       const alternatives = transcription.channel?.alternatives
       let text = ''
@@ -38,6 +40,7 @@ export class TranscriptionService extends EventEmitter {
         if (!this.speechFinal) {
           console.log('UtteranceEnd received before speechFinal, emit the text collected so far: ' + this.finalResult)
           this.emit('transcription', this.finalResult)
+          this.finalResult = ''
           return
         } else {
           console.log('speech was already final when UtteranceEnd recevied')
@@ -47,10 +50,11 @@ export class TranscriptionService extends EventEmitter {
 
       // console.log(text, "is_final: ", transcription?.is_final, "speech_final: ", transcription.speech_final);
       // if is_final that means that this chunk of the transcription is accurate, and we need to add it to the finalResult
-      if (transcription.is_final === true && text.trim().length > 0) {
+      if (transcription.is_final && text.trim().length > 0) {
+        console.log('is_final')
         this.finalResult += ` ${text}`
         // if speech_final and is_final that means this text is accurate and it's a natural pause in the speakers speech. We need to send this to the assistant for processing
-        if (transcription.speech_final === true) {
+        if (transcription.speech_final) {
           this.speechFinal = true // this will prevent a utterance end which shows up after speechFinal from sending another response
           this.emit('transcription', this.finalResult)
           this.finalResult = ''
@@ -59,6 +63,7 @@ export class TranscriptionService extends EventEmitter {
           this.speechFinal = false
         }
       } else {
+        // console.log('>>> emit utterance')
         this.emit('utterance', text)
       }
     })

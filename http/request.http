@@ -1,0 +1,16 @@
+POST http://localhost:80/owner
+Content-Type: application/json
+
+{
+  "Number": ""
+}
+
+###
+
+POST http://localhost:80/owner
+Content-Type: application/json
+
+{
+  "Number": "+4917697868644"
+}
+

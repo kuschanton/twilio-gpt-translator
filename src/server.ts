@@ -4,105 +4,160 @@ import {GptService} from './services/gpt-service'
 import {StreamService} from './services/stream-service'
 import {TranscriptionService} from './services/transcription-service'
 import {TextToSpeechService} from './services/tts-service'
-import {WebSocket} from 'ws'
+import bodyParser from 'body-parser'
+import {TwilioService} from './services/twilio-service'
+import {llm} from "./llm/llm";
+import {Response,} from 'express'
 
 require('dotenv').config()
 
 const app = expressWs(express()).app
+app.use(express.json())
+app.use(bodyParser.urlencoded({extended: true}))
 const port = process.env.PORT || 3000
 
-app.post('/incoming', (_, res) => {
-  res.status(200)
-  res.type('text/xml')
-  res.end(twiml)
+const gptService = new GptService(llm)
+
+/**
+ * This endpoint listens to start event from the conference. Once the second participant joins the conference starts and
+ * at this point we add ghost leg with translator speaker.
+ */
+app.post('/conference-status', (req, res) => {
+    console.log('>>> conference status', req.body)
+    const event: { ConferenceSid: string, StatusCallbackEvent: string } = req.body
+
+    // Sanity check for event type
+    if (event.StatusCallbackEvent === 'conference-start' && !!event.ConferenceSid) {
+        TwilioService.addGhostCallParticipant(event.ConferenceSid)
+    } else {
+        console.log('>>> conference status: ignoring event', req.body)
+    }
+
+    res.status(200)
+    res.end()
 })
 
-app.get('/', (req, res) => {
-  res.send('Hello World!')
+// TwiML endpoints
+
+app.post('/incoming-en', (req, res) => {
+    console.log('>>> incoming en', req.body)
+    sendTwiML(TwilioService.participantTwiml('en'), res)
 })
-app.ws('/connection', (ws, req) => {
-  ws.on('error', console.error)
-  // Filled in from start message
-  let streamSid: string
 
-  const gptService = new GptService()
-  const streamService = new StreamService(ws)
-  const transcriptionService = new TranscriptionService()
-  const ttsService = new TextToSpeechService()
+app.post('/incoming-de', (req, res) => {
+    console.log('>>> incoming de', req.body)
+    sendTwiML(TwilioService.participantTwiml('de'), res)
+})
 
-  let marks: any[] = []
-  let interactionCount = 0
+app.post('/incoming-ghost', (req, res) => {
+    console.log('>>> incoming ghost', req.body)
+    sendTwiML(TwilioService.ghostLegTwiml(), res)
+})
 
-  // Incoming from MediaStream
-  ws.on('message', (data) => {
-    // @ts-ignore
-    const msg = JSON.parse(data)
-    if (msg.event === 'start') {
-      console.log('>>> Start event')
-      streamSid = msg.start.streamSid
-      streamService.setStreamSid(streamSid)
-      console.log(`Starting Media Stream for ${streamSid}`)
-      ttsService.generate({
-        partialResponseIndex: null,
-        partialResponse: 'Hello! I understand you\'re looking for a pair of AirPods, is that correct?',
-      }, 1)
-    } else if (msg.event === 'media') {
-      transcriptionService.send(msg.media.payload)
-    } else if (msg.event === 'mark') {
-      console.log('>>> Mark event')
-      const label = msg.mark.name
-      console.log(`Media completed mark (${msg.sequenceNumber}): ${label}`)
-      marks = marks.filter(m => m !== msg.mark.name)
-    } else if (msg.event === 'stop') {
-      console.log('>>> Stop event')
-      console.log(`Media stream ${streamSid} ended.`)
-    }
-  })
+app.ws('/connection-en', (ws, req) => {
+    ws.on('error', console.error)
+    // Filled in from start message
+    let streamSid: string
+    const streamService = new StreamService(ws)
+    const transcriptionService = new TranscriptionService('en')
 
-  transcriptionService.on('utterance', async (text) => {
-    // This is a bit of a hack to filter out empty utterances
-    if (marks.length > 0 && text?.length > 5) {
-      console.log('Interruption, Clearing stream')
-      ws.send(
-        JSON.stringify({
-          streamSid,
-          event: 'clear',
-        }),
-      )
-    }
-  })
+    // Incoming from MediaStream
+    ws.on('message', async (data) => {
+        // @ts-ignore
+        const msg = JSON.parse(data)
+        if (msg.event === 'start') {
+            console.log('>>> Start event', msg)
+            streamSid = msg.start.streamSid
+            streamService.setStreamSid(streamSid)
+            console.log(`Starting Media Stream for ${streamSid}`)
+        } else if (msg.event === 'media') {
+            transcriptionService.send(msg.media.payload)
+        } else if (msg.event === 'stop') {
+            console.log('>>> Stop event')
+            console.log(`Media stream ${streamSid} ended.`)
+        }
+    })
 
-  transcriptionService.on('transcription', async (text) => {
-    if (!text) return
-    console.log(`Interaction ${interactionCount} – STT -> GPT: ${text}`)
-    gptService.completion(text, interactionCount)
-    interactionCount += 1
-  })
+    transcriptionService.on('transcription', async (text) => {
+        if (!text) return
+        console.log(`STT -> GPT: ${text}`)
+        // gptService.translation(text, 'Portuguese')
+        gptService.translation(text, 'German')
+    })
+})
 
-  gptService.on('gptreply', async (gptReply, icount) => {
-    console.log(`Interaction ${icount}: GPT -> TTS: ${gptReply.partialResponse}`)
-    ttsService.generate(gptReply, icount)
-  })
+app.ws('/connection-de', (ws, req) => {
+    ws.on('error', console.error)
+    // Filled in from start message
+    let streamSid: string
+    const streamService = new StreamService(ws)
+    const transcriptionService = new TranscriptionService('de')
 
-  ttsService.on('speech', (responseIndex, audio, label, icount) => {
-    console.log(`Interaction ${icount}: TTS -> TWILIO: ${label}`)
+    // Incoming from MediaStream
+    ws.on('message', async (data) => {
+        // @ts-ignore
+        const msg = JSON.parse(data)
+        if (msg.event === 'start') {
+            console.log('de>>> Start event', msg)
+            streamSid = msg.start.streamSid
+            streamService.setStreamSid(streamSid)
+            console.log(`de>>> Starting Media Stream for ${streamSid}`)
+        } else if (msg.event === 'media') {
+            transcriptionService.send(msg.media.payload)
+        } else if (msg.event === 'stop') {
+            console.log('de>>> Stop event')
+            console.log(`de>>> Media stream ${streamSid} ended.`)
+        }
+    })
 
-    streamService.buffer(responseIndex, audio)
-  })
+    transcriptionService.on('transcription', async (text) => {
+        if (!text) return
+        console.log(`de>>> STT -> GPT: ${text}`)
+        gptService.translation(text, 'English')
+    })
+})
 
-  streamService.on('audiosent', (markLabel) => {
-    marks.push(markLabel)
-  })
+app.ws('/connection-ghost', (ws, req) => {
+    ws.on('ghost>>> error', console.error)
+    // Filled in from start message
+    let streamSid: string
+
+    const streamService = new StreamService(ws)
+    const ttsService = new TextToSpeechService()
+
+    // Incoming from MediaStream
+    ws.on('message', async (data) => {
+        // @ts-ignore
+        const msg = JSON.parse(data)
+        if (msg.event === 'start') {
+            console.log('ghost>>> Start event', msg)
+            streamSid = msg.start.streamSid
+            streamService.setStreamSid(streamSid)
+            console.log(`ghost>>> Starting Media Stream for ${streamSid}`)
+        } else if (msg.event === 'stop') {
+            console.log('ghost>>> Stop event')
+            console.log(`ghost>>> Media stream ${streamSid} ended.`)
+        }
+    })
+
+    gptService.on('gptreply', async (gptReply) => {
+        console.log(`ghost>>> GPT -> TTS: ${gptReply}`)
+        ttsService.generate(gptReply)
+    })
+
+    ttsService.on('speech', (audio, label) => {
+        console.log(`ghost>>> TTS -> TWILIO: ${label}`)
+        streamService.buffer(audio)
+    })
+
 })
 
 app.listen(port, () => {
-  console.log(`Server is running at http://localhost:${port}`)
+    console.log(`Server is running at http://localhost:${port}`)
 })
 
-const twiml = `
-  <Response>
-    <Connect>
-      <Stream url="wss://${process.env.SERVER}/connection" />
-    </Connect>
-  </Response>
-  `
+const sendTwiML = (twiml: string, res: Response) => {
+    res.status(200)
+    res.type('text/xml')
+    res.end(twiml)
+}
