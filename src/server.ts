@@ -39,14 +39,14 @@ app.post('/conference-status', (req, res) => {
 
 // TwiML endpoints
 
-app.post('/incoming-en', (req, res) => {
+app.post('/incoming-a', (req, res) => {
     console.log('>>> incoming en', req.body)
-    sendTwiML(TwilioService.participantTwiml('en'), res)
+    sendTwiML(TwilioService.participantTwiml('a'), res)
 })
 
-app.post('/incoming-de', (req, res) => {
+app.post('/incoming-b', (req, res) => {
     console.log('>>> incoming de', req.body)
-    sendTwiML(TwilioService.participantTwiml('de'), res)
+    sendTwiML(TwilioService.participantTwiml('b'), res)
 })
 
 app.post('/incoming-ghost', (req, res) => {
@@ -54,12 +54,12 @@ app.post('/incoming-ghost', (req, res) => {
     sendTwiML(TwilioService.ghostLegTwiml(), res)
 })
 
-app.ws('/connection-en', (ws, req) => {
+app.ws('/connection-a', (ws, req) => {
     ws.on('error', console.error)
     // Filled in from start message
     let streamSid: string
     const streamService = new StreamService(ws)
-    const transcriptionService = new TranscriptionService('en')
+    const transcriptionService = new TranscriptionService(process.env.DEEPGRAM_LANGUAGE_A!!)
 
     // Incoming from MediaStream
     ws.on('message', async (data) => {
@@ -81,17 +81,16 @@ app.ws('/connection-en', (ws, req) => {
     transcriptionService.on('transcription', async (text) => {
         if (!text) return
         console.log(`STT -> GPT: ${text}`)
-        // gptService.translation(text, 'Portuguese')
-        gptService.translation(text, 'German')
+        gptService.translation(text, process.env.LANGUAGE_B!!)
     })
 })
 
-app.ws('/connection-de', (ws, req) => {
+app.ws('/connection-b', (ws, req) => {
     ws.on('error', console.error)
     // Filled in from start message
     let streamSid: string
     const streamService = new StreamService(ws)
-    const transcriptionService = new TranscriptionService('de')
+    const transcriptionService = new TranscriptionService(process.env.DEEPGRAM_LANGUAGE_B!!)
 
     // Incoming from MediaStream
     ws.on('message', async (data) => {
@@ -113,7 +112,7 @@ app.ws('/connection-de', (ws, req) => {
     transcriptionService.on('transcription', async (text) => {
         if (!text) return
         console.log(`de>>> STT -> GPT: ${text}`)
-        gptService.translation(text, 'English')
+        gptService.translation(text, process.env.LANGUAGE_A!!)
     })
 })
 

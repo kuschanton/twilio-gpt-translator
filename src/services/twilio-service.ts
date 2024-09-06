@@ -5,7 +5,8 @@ require('dotenv').config()
 
 const accountSid = process.env.TWILIO_ACCOUNT_SID
 const authToken = process.env.TWILIO_AUTH_TOKEN
-const fromNumber = process.env.FROM_NUMBER
+const ghostLegFromNumber = process.env.GHOST_LEG_FROM_NUMBER
+const ghostLegToNumber = process.env.GHOST_LEG_TO_NUMBER
 const client = new Twilio(accountSid, authToken)
 
 
@@ -14,8 +15,8 @@ export const TwilioService = {
         client.conferences(conferenceSid)
             .participants
             .create({
-                from: '+16307030027',
-                to: '+18665613032',
+                from: ghostLegFromNumber!!,
+                to: ghostLegToNumber!!,
             })
             .then(participant => console.log('Successfully added ghost leg participant:', participant.callSid))
             .catch(err => console.error('Error adding participant', err))

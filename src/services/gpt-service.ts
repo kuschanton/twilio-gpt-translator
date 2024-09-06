@@ -14,7 +14,7 @@ export class GptService extends EventEmitter {
 
     async translation(text: string, targetLanguage: string) {
 
-        console.log('Asking for translation', text)
+        console.log(`Asking for translation to ${targetLanguage}:`, text)
         const prompt = `
             Translate me following text to ${targetLanguage} language. In the response provide only the translated text, nothing else.
             Here is the text:
